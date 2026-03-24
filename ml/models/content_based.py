@@ -114,8 +114,37 @@ class ContentBasedFilter:
                 else:
                     feature_matrix = np.hstack([feature_matrix, genome_matrix.toarray()])
 
-        self._similarity = cosine_similarity(feature_matrix, dense_output=False)
+        # Use batched similarity for memory efficiency on large catalogs
+        # (adapted from Music Rec Project Similarity_calculator.batch_calculate_similarities)
+        self._similarity = self._batch_cosine_similarity(feature_matrix)
         return self
+
+    def _batch_cosine_similarity(
+        self, feature_matrix, batch_size: int = 1000
+    ) -> "scipy.sparse.csr_matrix":
+        """
+        Compute cosine similarity in row batches to avoid OOM on large matrices.
+        Returns a sparse matrix (same interface as cosine_similarity dense=False).
+        Adapted from Music Rec Project's batch_calculate_similarities.
+        """
+        from scipy.sparse import csr_matrix, vstack as sparse_vstack, issparse
+        import time
+
+        n = feature_matrix.shape[0]
+        start = time.time()
+        rows = []
+
+        for i in range(0, n, batch_size):
+            batch = feature_matrix[i: i + batch_size]
+            if issparse(batch):
+                batch_sim = cosine_similarity(batch, feature_matrix, dense_output=False)
+            else:
+                batch_sim = cosine_similarity(batch, feature_matrix, dense_output=False)
+            rows.append(batch_sim)
+
+        result = sparse_vstack(rows)
+        print(f"Similarity matrix built in {time.time() - start:.1f}s — shape {result.shape}")
+        return result
 
     def _build_genome_matrix(
         self, genome_df: pd.DataFrame, movies_df: pd.DataFrame
